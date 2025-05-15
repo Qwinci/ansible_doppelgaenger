@@ -21,7 +21,7 @@ def set_ips(ip_mapping, inventory)
       inventory["_meta"]["hostvars"][dev_host] = {}
     end
 
-    inventory["_meta"]["hostvars"][dev_host]["ansible_ssh_host"] = settings["ansible_ssh_host"]
+    inventory["_meta"]["hostvars"][dev_host]["ansible_host"] = settings["ansible_host"]
   end
   inventory
 end
@@ -93,7 +93,7 @@ def define_vagrant_vms(vagrant_config)
   inventory["_meta"]["hostvars"].each do |hostname, config|
     vagrant_config.vm.define hostname do |vm_config|
       vm_config.vm.hostname = hostname
-      vm_config.vm.network "private_network", ip: config["ansible_ssh_host"]
+      vm_config.vm.network "private_network", ip: config["ansible_host"]
       # configure_synced_folders(vm_config, hostname, config)
       if config.key?("vagrant_box")
         vm_config.vm.box = config["vagrant_box"]
@@ -110,7 +110,7 @@ def generate_hosts_file()
   hosts = File.read("hosts.base")
   inventory = create_dev_inventory
   inventory["vagrant"]["hosts"].each do |hostname, value|
-    hosts += inventory["_meta"]["hostvars"][hostname]["ansible_ssh_host"] + " " + hostname + "\n"
+    hosts += inventory["_meta"]["hostvars"][hostname]["ansible_host"] + " " + hostname + "\n"
   end
   hosts
 end
@@ -118,11 +118,11 @@ end
 def save_ip_mapping(hosts_to_add, ip, ip_mapping)
   # assign ips for hosts that are missing.
   hosts_to_add.each do |host|
-    ip_mapping[host] = {"ansible_ssh_host" =>  ip.to_s}
+    ip_mapping[host] = {"ansible_host" =>  ip.to_s}
     ip = ip.succ
   end
 
-  # Write the inventory file if there are ip changes to save.
+  # Write the ip mapping file if there are ip changes to save.
   if hosts_to_add != []
     File.write("ip_mapping.json", JSON.pretty_generate(ip_mapping))
   end
@@ -136,6 +136,23 @@ def load_ip_mapping()
   if ! ip_mapping
     ip_mapping    = {}
   end
+
+  # this script previously used ansible_ssh_host instead of ansible_host,
+  # migrate the old ansible_ssh_host entries to ansible_host.
+  # this can be removed when the migration is no longer needed.
+  updated_old_hosts = false
+  ip_mapping.keys.each do |host|
+    if ip_mapping[host].key?("ansible_ssh_host")
+      ip_mapping[host]["ansible_host"] = ip_mapping[host]["ansible_ssh_host"]
+      ip_mapping[host].delete("ansible_ssh_host")
+      updated_old_hosts = true
+    end
+  end
+
+  if updated_old_hosts
+    File.write("ip_mapping.json", JSON.pretty_generate(ip_mapping))
+  end
+
   ip_mapping
 end
 
@@ -150,7 +167,7 @@ def find_new_hosts_and_max_ip(inventory, ip_mapping)
         if ! ip_mapping.key?(host)
           hosts_to_add.push(host)
         else
-          used_ip = IPAddr.new ip_mapping[host]["ansible_ssh_host"]
+          used_ip = IPAddr.new ip_mapping[host]["ansible_host"]
           if used_ip > ip
             ip = used_ip
           end
@@ -236,7 +253,7 @@ end
 def get_hostvars_for_production(production_hosts)
   hostvars = {}
   production_hosts.each do |host|
-    hostvars[host] = {"ansible_ssh_user" => "root"}
+    hostvars[host] = {"ansible_user" => "root"}
   end
   hostvars
 end
