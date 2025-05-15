@@ -5,6 +5,7 @@ require 'yaml'
 require 'ipaddr'
 require 'fileutils'
 require 'pathname'
+require 'resolv'
 
 # Use property 'vagrant_synced_folders' in inventory.yml to specify
 # list of synced folders for each host.
@@ -12,6 +13,16 @@ require 'pathname'
 SyncedFolderConfig = Struct.new(:name, :path)
 DEFAULT_SYNCED_FOLDER = SyncedFolderConfig.new("sites", "/srv/sites")
 SYNCED_FOLDERS_BASE = Pathname("shared")
+
+# Synchronization related environment variables
+# ANSIBLE_SYNC_IP, specifies the IP of a production host to sync from.
+# ANSIBLE_SYNC_USER, specifies the user to use when synchronizing from the production host.
+# ANSIBLE_SYNC_USE_DNS, when set allows the usage of DNS to look up the production host IP if ANSIBLE_SYNC_IP is unset.
+
+ANSIBLE_SYNC_IP_UNSPECIFIED = "<ANSIBLE_SYNC_IP is unset>"
+$ansible_sync_ip = ANSIBLE_SYNC_IP_UNSPECIFIED
+$ansible_sync_user = "root"
+$ansible_sync_use_dns = false
 
 # Sets the development IP addresses in host vars overriding previous values.
 def set_ips(ip_mapping, inventory)
@@ -26,11 +37,32 @@ def set_ips(ip_mapping, inventory)
   inventory
 end
 
+def get_ip_from_dns(name)
+  Resolv::DNS.open do |dns|
+    begin
+      return dns.getaddress(name).to_s()
+    rescue => error
+      return ANSIBLE_SYNC_IP_UNSPECIFIED
+    end
+  end
+end
+
 # Rename hosts in hostvars for development.
 def get_hostvars(inventory)
   new_hostvars = {}
   inventory["_meta"]["hostvars"].each do |hostname, vars|
     new_hostvars[hostname + ".local"] = vars
+
+    if $ansible_sync_ip == ANSIBLE_SYNC_IP_UNSPECIFIED && $ansible_sync_use_dns
+      production_ip = get_ip_from_dns(hostname)
+    else
+      production_ip = $ansible_sync_ip
+    end
+
+    new_hostvars[hostname + ".prod"] = {
+      "ansible_host" => production_ip,
+      "ansible_user" => $ansible_sync_user
+    }
   end
   new_hostvars
 end
@@ -42,6 +74,7 @@ def set_hostnames(inventory)
       hosts = []
       value["hosts"].each do |host|host
         hosts.push(host + ".local")
+        hosts.push(host + ".prod")
       end
       inventory[key]["hosts"] = hosts
     end
@@ -118,7 +151,7 @@ end
 def save_ip_mapping(hosts_to_add, ip, ip_mapping)
   # assign ips for hosts that are missing.
   hosts_to_add.each do |host|
-    ip_mapping[host] = {"ansible_host" =>  ip.to_s}
+    ip_mapping[host] = {"ansible_host" => ip.to_s}
     ip = ip.succ
   end
 
@@ -134,7 +167,7 @@ def load_ip_mapping()
   end
 
   if ! ip_mapping
-    ip_mapping    = {}
+    ip_mapping = {}
   end
 
   # this script previously used ansible_ssh_host instead of ansible_host,
@@ -262,6 +295,21 @@ def create_dev_inventory()
   if ! File.file? "playbooks/inventory.yaml"
     puts "Inventory not found."
     exit 1
+  end
+
+  if ENV.has_key?("ANSIBLE_SYNC_IP")
+    $ansible_sync_ip = ENV["ANSIBLE_SYNC_IP"]
+  else
+    if ENV.has_key?("ANSIBLE_SYNC_USE_DNS")
+      $ansible_sync_use_dns = true
+      STDERR.puts "Using DNS to look up production host ip addresses"
+    else
+      STDERR.puts "ANSIBLE_SYNC_IP is not set and dns lookup not allowed, synchronizing from a production host will fail!"
+    end
+  end
+
+  if ENV.has_key?("ANSIBLE_SYNC_USER")
+    $ansible_sync_user = ENV["ANSIBLE_SYNC_USER"]
   end
 
   inventory = YAML.load File.read("playbooks/inventory.yaml")
