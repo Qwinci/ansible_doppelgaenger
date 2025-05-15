@@ -53,6 +53,7 @@ def ansible_cfg(password_file, legacy):
     filter_plugins = ./playbooks/filter_plugins
     timeout = 600
     vault_password_file = {password_file}
+    interpreter_python = /usr/bin/python3
 
     stdout_callback=debug
     stderr_callback=debug
