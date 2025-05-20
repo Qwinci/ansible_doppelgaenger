@@ -93,6 +93,7 @@ def vagrantfile():
         ansible.host_key_checking = false
         ansible.raw_ssh_args = ["-o UserKnownHostsFile=/dev/null"]
         ansible.force_remote_user = false
+        ansible.compatibility_mode = "2.0"
         ansible.extra_vars = {{
           file_sync_no_controlhost: "True",
           # site_content_sync: "True",
