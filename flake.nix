@@ -41,7 +41,9 @@
 
             # fix for vscode shell prompt escape characters
             bashInteractive
-            pkgsCross.aarch64-multiplatform.OVMF.fd
+
+            # UEFI firmware for AArch64, uncomment if needed
+            # pkgsCross.aarch64-multiplatform.OVMF.fd
           ];
 
           extraPackages = with pkgs; [
